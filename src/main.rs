@@ -1,14 +1,16 @@
-use std::{self, fs};
+use std::path::{Path, PathBuf};
+use std::{self, fs, io, env};
 use std::os::windows::prelude::*;
 use dialoguer::{console::Term, theme::ColorfulTheme, FuzzySelect};
 use indicatif::{ProgressBar, ProgressStyle};
+use path_absolutize::Absolutize;
 
 
 fn main() -> std::io::Result<()> {
     let args = std::env::args().collect::<Vec<_>>();
-    let path = &args[1];
-
-    println!("{path:?}");
+    let default_dir = ".".to_string();
+    let dir = args.get(1).unwrap_or(&default_dir);
+    let path = std::path::Path::new(dir);
 
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(ProgressStyle::with_template("[{elapsed_precise}] {spinner}\n{msg}").unwrap().tick_strings(&["Searching", "Searching.","Searching..", "Searching...", ""]));
@@ -17,14 +19,26 @@ fn main() -> std::io::Result<()> {
 
     spinner.finish();
 
+    if repos.len() == 0 {
+        println!("Couldnt find repos in the current directory");
+        return Ok(());
+    }
+
+    let full_paths_repos = repos.iter().map(|a| {
+        let expanded = shellexpand::full(a.to_str().unwrap()).unwrap().into_owned();
+        let expanded_path = Path::new(&expanded);
+        let canonical = expanded_path.absolutize();
+        canonical.unwrap().into_owned().into_os_string().into_string().unwrap()
+    })
+    .collect::<Vec<_>>();
     let selection = FuzzySelect::with_theme(&ColorfulTheme::default())
-        .items(&repos)
+        .items(&full_paths_repos)
         .default(0)
         .with_prompt("Select repository")
         .interact_on_opt(&Term::stderr())?;
 
     if let Some(selected_idx) = selection {
-        let selected = &repos[selected_idx];
+        let selected = &full_paths_repos[selected_idx];
         println!("{selected:?}");
         std::process::Command::new("wt").args(["new-tab", "--startingDirectory", selected]).output().expect("failed to open new tab");
 
@@ -44,10 +58,10 @@ fn is_valid_repository_candidate(dir_entry: &fs::DirEntry) -> bool {
     }
 }
 
-fn get_repositories(path: &String, updater: &mut Updater) -> Vec<String> {
+fn get_repositories(path: &std::path::Path, updater: &mut Updater) -> Vec<PathBuf> {
     let mut result = Vec::new();
     let mut traverse_queue = Vec::new();
-    traverse_queue.push(std::path::PathBuf::from(path));
+    traverse_queue.push(PathBuf::from(path));
 
     while let Some(popped) = traverse_queue.pop() {
         updater.update_current(&popped);
@@ -69,8 +83,7 @@ fn get_repositories(path: &String, updater: &mut Updater) -> Vec<String> {
                 }
 
                 if is_repo {
-                    let stringified_path = popped.into_os_string().into_string().unwrap();
-                    result.push(stringified_path);
+                    result.push(popped);
                     continue;
                 }
 
