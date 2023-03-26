@@ -1,0 +1,16 @@
+{
+    "configurations": [
+        {
+            "type": "cargo",
+            "name": "Cargo configuration",
+            "cargoArgs": ["run"],
+            "executableArgs": ["D:\\"],
+        },
+        {
+            "type": "cargo",
+            "name": "Cargo configuration release",
+            "cargoArgs": ["run", "-r"],
+            "executableArgs": ["D:\\"],
+        },
+    ]
+}
