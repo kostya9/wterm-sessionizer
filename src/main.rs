@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::{self, fs, io, env};
+use std::{self, fs};
 use std::os::windows::prelude::*;
 use dialoguer::{console::Term, theme::ColorfulTheme, FuzzySelect};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -103,11 +103,11 @@ fn get_repositories(path: &std::path::Path, updater: &mut Updater) -> Vec<PathBu
     result
 }
 
-struct Updater<'a> { bar: &'a ProgressBar, lastUpdated: Option<std::time::Instant> }
+struct Updater<'a> { bar: &'a ProgressBar, last_updated: Option<std::time::Instant> }
 
 impl<'a> Updater<'a> {
     fn update_current(&mut self, string: &std::path::PathBuf) {
-        match self.lastUpdated {
+        match self.last_updated {
             Some(last_updated) => {
                 let now = std::time::Instant::now();
                 let delta = now - last_updated;
@@ -120,10 +120,10 @@ impl<'a> Updater<'a> {
 
         self.bar.tick();
         self.bar.set_message(string.clone().into_os_string().into_string().unwrap());
-        self.lastUpdated = Some(std::time::Instant::now());
+        self.last_updated = Some(std::time::Instant::now());
     }
 
     fn new(spinner: &ProgressBar) -> Updater {
-        Updater { bar: spinner, lastUpdated: None }
+        Updater { bar: spinner, last_updated: None }
     }
 }
