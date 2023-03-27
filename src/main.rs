@@ -40,7 +40,8 @@ fn main() -> std::io::Result<()> {
     if let Some(selected_idx) = selection {
         let selected = &full_paths_repos[selected_idx];
         println!("{selected:?}");
-        std::process::Command::new("wt").args(["new-tab", "--startingDirectory", selected]).output().expect("failed to open new tab");
+        wt  0 nt -d
+        std::process::Command::new("wt").args(["-w ", "0", "nt", "-d", selected]).output().expect("failed to open new tab");
 
     }
 
