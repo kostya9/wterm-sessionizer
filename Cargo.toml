@@ -8,6 +8,7 @@ homepage = "https://github.com/kostya9/wterm-sessionizer"
 repository = "https://github.com/kostya9/wterm-sessionizer"
 keywords = ["cli", "search", "repositories"]
 categories = ["command-line-utilities"]
+edition="2021"
 
 [[bin]]
 name = "wts"
