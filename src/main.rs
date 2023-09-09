@@ -15,7 +15,15 @@ fn main() -> std::io::Result<()> {
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(ProgressStyle::with_template("[{elapsed_precise}] {spinner}\n{msg}").unwrap().tick_strings(&["Searching", "Searching.","Searching..", "Searching...", ""]));
     let mut updater = Updater::new(&spinner);
-    let repos = get_repositories(path, &mut updater);
+    let repo_paths = get_repository_paths(path, &mut updater);
+    let repos = repo_paths.into_iter().map(|p| {
+        let details = get_repo_info(&p);
+        return RepoInfo {
+            path: p,
+            detailed_repo_info: details
+        }
+    }).collect::<Vec<_>>();
+
 
     spinner.finish();
 
@@ -25,12 +33,20 @@ fn main() -> std::io::Result<()> {
     }
 
     let full_paths_repos = repos.iter().map(|a| {
-        let expanded = shellexpand::full(a.to_str().unwrap()).unwrap().into_owned();
+        let expanded = shellexpand::full(a.path.to_str().unwrap()).unwrap().into_owned();
         let expanded_path = Path::new(&expanded);
         let canonical = expanded_path.absolutize();
-        canonical.unwrap().into_owned().into_os_string().into_string().unwrap()
-    })
-    .collect::<Vec<_>>();
+        let display_path = canonical.unwrap().into_owned().into_os_string().into_string().unwrap();
+        let emoji = match a.detailed_repo_info.first() {
+            None => "",
+            Some(DetailedRepoInfo::NpmProject) => " [js]",
+            Some(DetailedRepoInfo::CsharpProject) => " [csharp]",
+            Some(DetailedRepoInfo::GoProject) => " [go]"
+        };
+
+        return display_path + emoji;
+    }).collect::<Vec<_>>();
+
     let selection = FuzzySelect::with_theme(&ColorfulTheme::default())
         .items(&full_paths_repos)
         .default(0)
@@ -40,11 +56,14 @@ fn main() -> std::io::Result<()> {
     if let Some(selected_idx) = selection {
         let selected = &full_paths_repos[selected_idx];
         println!("{selected:?}");
-        std::process::Command::new("wt").args(["-w", "0", "nt", "-d", selected]).output().expect("failed to open new tab");
-
+        open_tab(selected);
     }
 
     Ok(())
+}
+
+fn open_tab(directory: &String){
+    std::process::Command::new("wt").args(["-w", "0", "nt", "-d", directory]).output().expect("failed to open new tab");
 }
 
 fn is_valid_repository_candidate(dir_entry: &fs::DirEntry) -> bool {
@@ -58,7 +77,7 @@ fn is_valid_repository_candidate(dir_entry: &fs::DirEntry) -> bool {
     }
 }
 
-fn get_repositories(path: &std::path::Path, updater: &mut Updater) -> Vec<PathBuf> {
+fn get_repository_paths(path: &std::path::Path, updater: &mut Updater) -> Vec<PathBuf> {
     let mut result = Vec::new();
     let mut traverse_queue = Vec::new();
     traverse_queue.push(PathBuf::from(path));
@@ -103,19 +122,52 @@ fn get_repositories(path: &std::path::Path, updater: &mut Updater) -> Vec<PathBu
     result
 }
 
+struct RepoInfo {
+    path: PathBuf,
+    detailed_repo_info: Vec<DetailedRepoInfo>
+}
+
+enum DetailedRepoInfo {
+    CsharpProject,
+    NpmProject,
+    GoProject,
+}
+
+fn get_repo_info(path: &std::path::PathBuf) -> Vec<DetailedRepoInfo> {
+    let mut repos = Vec::new();
+
+    let inner_items = path.read_dir().unwrap();
+    for item in inner_items {
+        let unwrapped = item.unwrap();
+        let os_file_name = unwrapped.file_name();
+        let file_name = os_file_name.to_string_lossy();
+        if file_name.ends_with(".sln") {
+            repos.push(DetailedRepoInfo::CsharpProject);
+        }
+
+        if file_name == "package.json" {
+            repos.push(DetailedRepoInfo::NpmProject);
+        }
+
+        if file_name == "go.mod" {
+            repos.push(DetailedRepoInfo::GoProject);
+        }
+    }
+
+    return repos;
+
+}
+
 struct Updater<'a> { bar: &'a ProgressBar, last_updated: Option<std::time::Instant> }
 
 impl<'a> Updater<'a> {
     fn update_current(&mut self, string: &std::path::PathBuf) {
-        match self.last_updated {
-            Some(last_updated) => {
-                let now = std::time::Instant::now();
-                let delta = now - last_updated;
-                if delta < std::time::Duration::from_millis(200) {
-                    return;
-                }
+        if let Some(last_updated) = self.last_updated {
+            let now = std::time::Instant::now();
+            let delta = now - last_updated;
+            if delta < std::time::Duration::from_millis(200) {
+                return;
             }
-            _ => (),
         }
 
         self.bar.tick();
