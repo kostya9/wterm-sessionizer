@@ -4,13 +4,18 @@ use std::os::windows::prelude::*;
 use dialoguer::{console::Term, theme::ColorfulTheme, FuzzySelect};
 use indicatif::{ProgressBar, ProgressStyle};
 use path_absolutize::Absolutize;
+use clap::Parser;
 
+#[derive(Parser, Debug)]
+#[command(about)]
+struct Args {
+    #[arg(default_value = ".")]
+    path: String,
+}
 
 fn main() -> std::io::Result<()> {
-    let args = std::env::args().collect::<Vec<_>>();
-    let default_dir = ".".to_string();
-    let dir = args.get(1).unwrap_or(&default_dir);
-    let path = std::path::Path::new(dir);
+    let cli = Args::parse();
+    let path = std::path::Path::new(&cli.path);
 
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(ProgressStyle::with_template("[{elapsed_precise}] {spinner}\n{msg}").unwrap().tick_strings(&["Searching", "Searching.","Searching..", "Searching...", ""]));
