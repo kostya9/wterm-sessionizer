@@ -136,7 +136,7 @@ enum DetailedRepoInfo {
 fn get_repo_info(path: &std::path::PathBuf) -> Vec<DetailedRepoInfo> {
     let mut repos = Vec::new();
 
-    let inner_items = path.read_dir().unwrap();
+    let inner_items = path.read_dir().unwrap().filter(|f| f.is_ok());
     for item in inner_items {
         let unwrapped = item.unwrap();
         let os_file_name = unwrapped.file_name();
