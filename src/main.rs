@@ -38,7 +38,8 @@ fn main() -> std::io::Result<()> {
             None => "",
             Some(DetailedRepoInfo::NpmProject) => " [js]",
             Some(DetailedRepoInfo::CsharpProject) => " [csharp]",
-            Some(DetailedRepoInfo::GoProject) => " [go]"
+            Some(DetailedRepoInfo::GoProject) => " [go]",
+            Some(DetailedRepoInfo::RustProject) => " [rust]"
         };
 
         return a.path.clone() + emoji;
@@ -138,6 +139,7 @@ enum DetailedRepoInfo {
     CsharpProject,
     NpmProject,
     GoProject,
+    RustProject,
 }
 
 fn get_repo_info(path: &std::path::PathBuf) -> Vec<DetailedRepoInfo> {
@@ -158,6 +160,10 @@ fn get_repo_info(path: &std::path::PathBuf) -> Vec<DetailedRepoInfo> {
 
         if file_name == "go.mod" {
             repos.push(DetailedRepoInfo::GoProject);
+        }
+
+        if file_name == "Cargo.toml" {
+            repos.push(DetailedRepoInfo::RustProject);
         }
     }
 
