@@ -18,8 +18,9 @@ fn main() -> std::io::Result<()> {
     let repo_paths = get_repository_paths(path, &mut updater);
     let repos = repo_paths.into_iter().map(|p| {
         let details = get_repo_info(&p);
+        let full_path = to_full_path(&p);
         return RepoInfo {
-            path: p,
+            path: full_path,
             detailed_repo_info: details
         }
     }).collect::<Vec<_>>();
@@ -33,10 +34,6 @@ fn main() -> std::io::Result<()> {
     }
 
     let full_paths_repos = repos.iter().map(|a| {
-        let expanded = shellexpand::full(a.path.to_str().unwrap()).unwrap().into_owned();
-        let expanded_path = Path::new(&expanded);
-        let canonical = expanded_path.absolutize();
-        let display_path = canonical.unwrap().into_owned().into_os_string().into_string().unwrap();
         let emoji = match a.detailed_repo_info.first() {
             None => "",
             Some(DetailedRepoInfo::NpmProject) => " [js]",
@@ -44,7 +41,7 @@ fn main() -> std::io::Result<()> {
             Some(DetailedRepoInfo::GoProject) => " [go]"
         };
 
-        return display_path + emoji;
+        return a.path.clone() + emoji;
     }).collect::<Vec<_>>();
 
     let selection = FuzzySelect::with_theme(&ColorfulTheme::default())
@@ -54,7 +51,7 @@ fn main() -> std::io::Result<()> {
         .interact_on_opt(&Term::stderr())?;
 
     if let Some(selected_idx) = selection {
-        let selected = &full_paths_repos[selected_idx];
+        let selected = &repos[selected_idx].path;
         println!("{selected:?}");
         open_tab(selected);
     }
@@ -64,6 +61,16 @@ fn main() -> std::io::Result<()> {
 
 fn open_tab(directory: &String){
     std::process::Command::new("wt").args(["-w", "0", "nt", "-d", directory]).output().expect("failed to open new tab");
+}
+
+
+fn to_full_path(path: &PathBuf) -> String {
+    let expanded = shellexpand::full(path.to_str().unwrap()).unwrap().into_owned();
+    let expanded_path = Path::new(&expanded);
+    let canonical = expanded_path.absolutize();
+    let full_path = canonical.unwrap().into_owned().into_os_string().into_string().unwrap();
+
+    return full_path;
 }
 
 fn is_valid_repository_candidate(dir_entry: &fs::DirEntry) -> bool {
@@ -123,7 +130,7 @@ fn get_repository_paths(path: &std::path::Path, updater: &mut Updater) -> Vec<Pa
 }
 
 struct RepoInfo {
-    path: PathBuf,
+    path: String,
     detailed_repo_info: Vec<DetailedRepoInfo>
 }
 
