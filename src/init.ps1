@@ -5,4 +5,4 @@ $newPrompt = "$oldPrompt; `$newDir = Get-Location; if (`$newDir -ne `$oldDir) {w
 
 Set-Item -Path Function:prompt -Value $newPrompt
 
-function wts { $result = @((wts.exe $args) -join "`n"); if ($result.StartsWith("/*Execute*/")) { @($result) | Invoke-Expression } else { echo  "Result - " + $result } }
+function wts { $result = @((wts.exe $args) -join "`n"); if ($result.StartsWith("/#Execute#/")) { @($result) | Invoke-Expression } else { echo $result } }

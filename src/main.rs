@@ -102,10 +102,10 @@ fn find_project(path: String, new_tab: bool) -> Result<()> {
 
 fn open_tab(directory: &String, new_tab: bool){
     if new_tab {
-        print!("/*Execute*/wt -w 0 nt -d {:}", directory);
+        print!("/#Execute#/wt -w 0 nt -d {:}", directory);
     }
     else {
-        print!("/*Execute*/cd {:}", directory);
+        print!("/#Execute#/cd {:}", directory);
     }
     // std::process::Command::new("wt").args(["-w", "0", "nt", "-d", directory]).output().expect("failed to open new tab");
 }
