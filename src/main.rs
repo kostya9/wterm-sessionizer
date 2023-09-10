@@ -12,18 +12,16 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 #[command(arg_required_else_help = true)]
 struct Cli {
     #[command(subcommand)]
-    command: Option<Commands>
+    command: Option<Commands>,
+
+    // Make this command default
+   #[clap(flatten)]
+    find_project: FindProjectArgs
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    FindProject {
-        #[arg(default_value = ".")]
-        path: String,
-
-        #[arg(short, long)]
-        new_tab: bool,
-    },
+    FindProject(FindProjectArgs),
     OnChangedDirectory {
         path: String
     },
@@ -31,13 +29,22 @@ enum Commands {
     }
 }
 
+#[derive(Debug, clap::Args)]
+struct FindProjectArgs {
+        #[arg(default_value = ".")]
+        path: String,
+
+        #[arg(short, long)]
+        new_tab: bool,
+}
+
 
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    return match cli.command.unwrap() {
-        Commands::FindProject { path, new_tab } => 
+    return match cli.command.unwrap_or(Commands::FindProject(cli.find_project)) {
+        Commands::FindProject(FindProjectArgs { path, new_tab })=> 
         {
             return find_project(path, new_tab);
         },
@@ -46,6 +53,7 @@ fn main() -> Result<()> {
             print!("{:}", content);
             return Ok(());
         },
+
         _ => Ok(())
     };
 }
