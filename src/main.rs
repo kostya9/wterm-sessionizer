@@ -4,18 +4,54 @@ use std::os::windows::prelude::*;
 use dialoguer::{console::Term, theme::ColorfulTheme, FuzzySelect};
 use indicatif::{ProgressBar, ProgressStyle};
 use path_absolutize::Absolutize;
-use clap::Parser;
+use clap::{Parser, Subcommand};
+
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 #[derive(Parser, Debug)]
-#[command(about)]
-struct Args {
-    #[arg(default_value = ".")]
-    path: String,
+#[command(arg_required_else_help = true)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>
 }
 
-fn main() -> std::io::Result<()> {
-    let cli = Args::parse();
-    let path = std::path::Path::new(&cli.path);
+#[derive(Subcommand, Debug)]
+enum Commands {
+    FindProject {
+        #[arg(default_value = ".")]
+        path: String,
+
+        #[arg(short, long)]
+        new_tab: bool,
+    },
+    OnChangedDirectory {
+        path: String
+    },
+    Init {
+    }
+}
+
+
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    return match cli.command.unwrap() {
+        Commands::FindProject { path, new_tab } => 
+        {
+            return find_project(path, new_tab);
+        },
+        Commands::Init {  } => {
+            let content = include_str!("init.ps1");
+            print!("{:}", content);
+            return Ok(());
+        },
+        _ => Ok(())
+    };
+}
+
+fn find_project(path: String, new_tab: bool) -> Result<()> {
+    let path = std::path::Path::new(&path);
 
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(ProgressStyle::with_template("[{elapsed_precise}] {spinner}\n{msg}").unwrap().tick_strings(&["Searching", "Searching.","Searching..", "Searching...", ""]));
@@ -59,14 +95,20 @@ fn main() -> std::io::Result<()> {
     if let Some(selected_idx) = selection {
         let selected = &repos[selected_idx].path;
         println!("{selected:?}");
-        open_tab(selected);
+        open_tab(selected, new_tab);
     }
 
-    Ok(())
+    return Ok(())
 }
 
-fn open_tab(directory: &String){
-    std::process::Command::new("wt").args(["-w", "0", "nt", "-d", directory]).output().expect("failed to open new tab");
+fn open_tab(directory: &String, new_tab: bool){
+    if new_tab {
+        print!("wt -w 0 nt -d {:}", directory);
+    }
+    else {
+        print!("cd {:}", directory);
+    }
+    // std::process::Command::new("wt").args(["-w", "0", "nt", "-d", directory]).output().expect("failed to open new tab");
 }
 
 

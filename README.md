@@ -14,3 +14,9 @@ c:\repo2 [csharp]
 ```
 cargo install wterm-sessionizer --version 0.0.6-alpha
 ```
+
+Add to your powershell profile
+
+```pwsh
+@(wts init)
+```
