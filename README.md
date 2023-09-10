@@ -12,11 +12,11 @@ c:\repo2 [csharp]
 
 ## Installation:
 ```
-cargo install wterm-sessionizer --version 0.0.8-alpha
+cargo install wterm-sessionizer --version 0.0.9-alpha
 ```
 
 Add to your powershell profile
 
 ```pwsh
-@(wts init)
+@((wts init) -join "`n") | Invoke-Expression
 ```

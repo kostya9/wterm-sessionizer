@@ -94,7 +94,6 @@ fn find_project(path: String, new_tab: bool) -> Result<()> {
 
     if let Some(selected_idx) = selection {
         let selected = &repos[selected_idx].path;
-        println!("{selected:?}");
         open_tab(selected, new_tab);
     }
 
