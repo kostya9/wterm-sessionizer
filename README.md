@@ -20,3 +20,6 @@ Add to your powershell profile
 ```pwsh
 @((wts init) -join "`n") | Invoke-Expression
 ```
+
+> [!IMPORTANT]
+> Add the powershell profile code AFTER the prompt modifiers like oh-my-posh so that they won't overwrite the custom logic of wts.
