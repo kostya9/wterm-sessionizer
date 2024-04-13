@@ -48,10 +48,7 @@ impl<T> Dialogue<T> where T: Display, T: Eq {
             }
 
             let end_position = renderer.get_position();
-            renderer.move_cursor_to(&RendererPosition {
-                x: position.x + full_input.input.len(),
-                y: position.y,
-            });
+            renderer.move_cursor_to(&position.with_x(position.x + full_input.input.len()));
 
             renderer.term.show_cursor().unwrap();
             match renderer.term.read_key().unwrap()
@@ -154,7 +151,6 @@ impl<T> Dialogue<T> where T: Display, T: Eq {
 
             if binary_heap.len() > input.max_predictions { binary_heap.pop(); }
         }
-
 
         predictions.clear();
         for prediction in binary_heap {
@@ -329,4 +325,27 @@ impl Renderer {
 struct RendererPosition {
     x: usize,
     y: usize,
+}
+
+impl RendererPosition {
+    fn zero() -> RendererPosition {
+        return RendererPosition {
+            x: 0,
+            y: 0,
+        };
+    }
+
+    fn with_x(&self, x: usize) -> RendererPosition {
+        return RendererPosition {
+            x,
+            y: self.y,
+        };
+    }
+
+    fn with_y(&self, y: usize) -> RendererPosition {
+        return RendererPosition {
+            x: self.x,
+            y,
+        };
+    }
 }
