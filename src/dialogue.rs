@@ -227,7 +227,6 @@ struct CurrentInput<'a, T> {
 struct Renderer {
     lines_number: usize,
     term: Term,
-    x_position: usize,
     cursor_position: RendererPosition,
 }
 
@@ -240,9 +239,8 @@ impl Renderer {
     fn new() -> Renderer {
         Renderer {
             lines_number: 0,
-            x_position: 0,
             term: Term::stderr(),
-            cursor_position: RendererPosition { x: 0, y: 0 },
+            cursor_position: RendererPosition::zero(),
         }
     }
 
@@ -264,7 +262,7 @@ impl Renderer {
     fn clear(&mut self) {
         self.term.clear_last_lines(self.lines_number).unwrap();
         self.lines_number = 0;
-        self.cursor_position = RendererPosition { y: 0, x: 0 };
+        self.cursor_position = RendererPosition::zero();
     }
 
     fn write_line(&mut self, message: &str) {
