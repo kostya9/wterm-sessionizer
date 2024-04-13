@@ -3,8 +3,8 @@ use std::collections::BinaryHeap;
 use std::fmt::Display;
 use std::io::Write;
 
-use dialoguer::{console::Term, theme::SimpleTheme};
 use dialoguer::console::{Key, style, StyledObject};
+use dialoguer::console::Term;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 
@@ -216,7 +216,6 @@ struct CurrentInput<'a, T> {
 }
 
 struct Renderer {
-    theme: SimpleTheme,
     lines_number: usize,
     term: Term,
     x_position: usize,
@@ -230,7 +229,6 @@ struct Selected<'a, T> {
 impl Renderer {
     fn new() -> Renderer {
         Renderer {
-            theme: SimpleTheme {},
             lines_number: 0,
             x_position: 0,
             term: Term::stderr(),
