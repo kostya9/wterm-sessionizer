@@ -4,7 +4,7 @@ use std::fmt::Display;
 use std::io::Write;
 
 use dialoguer::{console::Term, theme::SimpleTheme};
-use dialoguer::console::Key;
+use dialoguer::console::{Key, style};
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 
@@ -25,6 +25,7 @@ impl<T> Dialogue<T> where T: Display {
             predictions: vec![],
             max_predictions: 5,
             matcher: SkimMatcherV2::default(),
+            selected: None,
         };
 
 
@@ -37,8 +38,12 @@ impl<T> Dialogue<T> where T: Display {
 
             renderer.write_line(&full_input.input);
 
-            for item in &full_input.predictions {
-                renderer.write_line(&item.to_string());
+            for (idx, &item) in full_input.predictions.iter().enumerate() {
+                let is_selected = match &full_input.selected {
+                    Some(s) => s.idx == idx,
+                    None => false
+                };
+                renderer.write_line_formatted(&item.to_string(), is_selected);
             }
 
             let cursor_dy = renderer.lines_number - 1;
@@ -69,6 +74,31 @@ impl<T> Dialogue<T> where T: Display {
                         full_input.cursor += 1;
                     }
                 }
+                Key::ArrowUp => {
+                    let last_idx = full_input.predictions.len() - 1;
+                    let mut next_idx = match &full_input.selected {
+                        Some(s) => if s.idx == 0 { last_idx } else { s.idx - 1 },
+                        None => last_idx
+                    };
+
+                    full_input.selected = Some(Selected {
+                        idx: next_idx,
+                        item: full_input.predictions.get(next_idx).unwrap(),
+                    })
+                }
+                Key::ArrowDown => {
+                    let last_idx = full_input.predictions.len() - 1;
+                    let mut next_idx = match &full_input.selected {
+                        Some(s) => if s.idx == last_idx { 0 } else { s.idx + 1 },
+                        None => 0
+                    };
+
+                    full_input.selected = Some(Selected {
+                        idx: next_idx,
+                        item: full_input.predictions.get(next_idx).unwrap(),
+                    })
+                }
+
                 _ => {}
             }
 
@@ -139,12 +169,18 @@ struct CurrentInput<'a, T> {
     predictions: Vec<&'a T>,
     max_predictions: usize,
     matcher: SkimMatcherV2,
+    selected: Option<Selected<'a, T>>,
 }
 
 struct Renderer {
     theme: SimpleTheme,
     lines_number: usize,
     term: Term,
+}
+
+struct Selected<'a, T> {
+    idx: usize,
+    item: &'a T,
 }
 
 impl Renderer {
@@ -163,6 +199,17 @@ impl Renderer {
 
     fn write_line(&mut self, message: &str) {
         self.term.write_line(message).unwrap();
+        self.lines_number += 1;
+    }
+
+    fn write_line_formatted(&mut self, message: &str, selected: bool) {
+        let mut styled_message = style(message);
+        if selected {
+            styled_message = styled_message.bold();
+        }
+        
+        self.term.write_fmt(format_args!("{}", styled_message)).unwrap();
+        self.term.write_line("").unwrap();
         self.lines_number += 1;
     }
 
