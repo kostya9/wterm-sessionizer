@@ -17,7 +17,7 @@ impl<T> Dialogue<T> where T: Display, T: Eq {
         Dialogue { items: vec![] }
     }
 
-    pub fn interact(&self) {
+    pub fn interact(&self) -> Option<&T> {
         let mut renderer = Renderer::new();
         let mut full_input = CurrentInput {
             cursor: 0,
@@ -28,7 +28,6 @@ impl<T> Dialogue<T> where T: Display, T: Eq {
             selected: None,
         };
 
-
         loop {
             self.fill_predictions(&mut full_input);
             full_input.selected = self.get_new_selected(&full_input);
@@ -36,7 +35,7 @@ impl<T> Dialogue<T> where T: Display, T: Eq {
 
             let choose_prompt = "Choose: ";
             renderer.write_prompt(choose_prompt);
-            let x_prompt_end = renderer.x_position;
+            let position = renderer.get_position();
 
             renderer.write_line(&full_input.input);
 
@@ -48,10 +47,11 @@ impl<T> Dialogue<T> where T: Display, T: Eq {
                 renderer.write_selection_item(&item.to_string(), is_selected);
             }
 
-            let cursor_dy = renderer.lines_number;
-            let cursor_dx = x_prompt_end + full_input.cursor;
-            renderer.term.move_cursor_up(cursor_dy).unwrap();
-            renderer.term.move_cursor_right(cursor_dx).unwrap();
+            let end_position = renderer.get_position();
+            renderer.move_cursor_to(&RendererPosition {
+                x: position.x + full_input.input.len(),
+                y: position.y,
+            });
 
             renderer.term.show_cursor().unwrap();
             match renderer.term.read_key().unwrap()
@@ -66,7 +66,10 @@ impl<T> Dialogue<T> where T: Display, T: Eq {
                         full_input.cursor -= 1;
                     }
                 }
-                Key::Escape => break,
+                Key::Escape => {
+                    renderer.move_cursor_to(&end_position);
+                    return None;
+                }
                 Key::ArrowLeft => {
                     if full_input.cursor > 0 {
                         full_input.cursor -= 1;
@@ -109,13 +112,23 @@ impl<T> Dialogue<T> where T: Display, T: Eq {
                         })
                     }
                 }
+                Key::Enter => {
+                    match full_input.selected {
+                        Some(selection) => {
+                            renderer.move_cursor_to(&end_position);
+                            renderer.clear();
+                            renderer.write_successful("Choose: ", selection.item);
+                            return Some(selection.item);
+                        }
+                        None => {}
+                    }
+                }
 
                 _ => {}
             }
 
             renderer.term.hide_cursor().unwrap();
-            renderer.term.move_cursor_left(cursor_dx).unwrap();
-            renderer.term.move_cursor_down(cursor_dy).unwrap();
+            renderer.move_cursor_to(&end_position);
         }
     }
 
@@ -219,6 +232,7 @@ struct Renderer {
     lines_number: usize,
     term: Term,
     x_position: usize,
+    cursor_position: RendererPosition,
 }
 
 struct Selected<'a, T> {
@@ -232,26 +246,44 @@ impl Renderer {
             lines_number: 0,
             x_position: 0,
             term: Term::stderr(),
+            cursor_position: RendererPosition { x: 0, y: 0 },
         }
+    }
+
+    fn get_position(&self) -> RendererPosition {
+        return self.cursor_position.clone();
+    }
+
+    fn move_cursor_to(&mut self, position: &RendererPosition) {
+        if self.cursor_position.y > position.y {
+            self.term.move_cursor_up(self.cursor_position.y - position.y).unwrap();
+        } else {
+            self.term.move_cursor_down(position.y - self.cursor_position.y).unwrap();
+        }
+
+        self.term.move_cursor_right(position.x).unwrap();
+        self.cursor_position = position.clone();
     }
 
     fn clear(&mut self) {
         self.term.clear_last_lines(self.lines_number).unwrap();
         self.lines_number = 0;
-        self.x_position = 0;
+        self.cursor_position = RendererPosition { y: 0, x: 0 };
     }
 
     fn write_line(&mut self, message: &str) {
         self.term.write_line(message).unwrap();
         self.lines_number += 1;
-        self.x_position = 0;
+        self.cursor_position.x = 0;
+        self.cursor_position.y += 1;
     }
 
     fn write_line_formatted<T: Display>(&mut self, styled_object: StyledObject<T>) {
         self.write_formatted(styled_object);
         self.term.write_line("").unwrap();
         self.lines_number += 1;
-        self.x_position = 0;
+        self.cursor_position.x = 0;
+        self.cursor_position.y += 1;
     }
 
     fn write(&mut self, message: &str) {
@@ -274,14 +306,27 @@ impl Renderer {
             style(item)
         };
 
-        self.x_position = self.x_position + padding_left + item.len();
+        self.cursor_position.x = self.cursor_position.x + padding_left + item.len();
         self.write_line_formatted(styled_message);
     }
 
     fn write_prompt(&mut self, prompt: &str) {
         let padding_left = 3;
         let prefix = style("?").yellow().to_string() + (0..padding_left - 1).map(|_| " ").collect::<String>().as_str();
-        self.x_position = self.x_position + padding_left + prompt.len();
+        self.cursor_position.x = self.cursor_position.x + padding_left + prompt.len();
         self.write_formatted(style(prefix + prompt).bold());
     }
+
+    pub fn write_successful<T>(&mut self, successful_message: &str, item: &T) where T: Display {
+        let padding_left = 3;
+        let prefix = style("✔").yellow().to_string() + (0..padding_left - 1).map(|_| " ").collect::<String>().as_str();
+        self.cursor_position.x = self.cursor_position.x + padding_left + successful_message.len() + item.to_string().len();
+        self.write_formatted(style(prefix + successful_message + item.to_string().as_str()).bold());
+    }
+}
+
+#[derive(Clone)]
+struct RendererPosition {
+    x: usize,
+    y: usize,
 }

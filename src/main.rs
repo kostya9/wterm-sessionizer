@@ -207,7 +207,7 @@ enum DetailedRepoInfo {
     RustProject,
 }
 
-fn get_repo_info(path: &std::path::PathBuf) -> Vec<DetailedRepoInfo> {
+fn get_repo_info(path: &PathBuf) -> Vec<DetailedRepoInfo> {
     let mut repos = Vec::new();
 
     let inner_items = path.read_dir().unwrap().filter(|f| f.is_ok());
