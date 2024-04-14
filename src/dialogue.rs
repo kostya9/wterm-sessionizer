@@ -1,57 +1,79 @@
-use std::cmp::Ordering;
+use std::{io, mem};
+use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
 use std::fmt::Display;
 use std::io::Write;
+use std::ops::Deref;
+use std::sync::mpsc::Receiver;
+use std::thread::sleep;
+use std::time::Duration;
 
 use dialoguer::console::{Key, style, StyledObject};
 use dialoguer::console::Term;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 
+mod windows_input;
+
 pub struct Dialogue<T> {
     items: Vec<T>,
+    additional_items_receiver: Receiver<Box<T>>,
 }
 
-impl<T> Dialogue<T> where T: Display, T: Eq {
-    pub fn new() -> Dialogue<T> {
-        Dialogue { items: vec![] }
+impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
+    pub fn new(receiver: Receiver<Box<T>>) -> Dialogue<T> {
+        Dialogue { items: vec![], additional_items_receiver: receiver }
     }
 
-    pub fn interact(&self) -> Option<&T> {
+    pub fn interact(&mut self) -> io::Result<Option<T>> {
         let mut renderer = Renderer::new();
         let mut full_input = CurrentInput {
             cursor: 0,
             input: "".to_string(),
             predictions: vec![],
-            max_predictions: 5,
+            max_predictions: 20,
             matcher: SkimMatcherV2::default().ignore_case(),
             selected: None,
         };
 
-        loop {
+        'outer: loop {
             self.fill_predictions(&mut full_input);
-            full_input.selected = self.get_new_selected(&full_input);
-            renderer.clear();
+            renderer.clear()?;
 
             let choose_prompt = "Choose: ";
-            renderer.write_prompt(choose_prompt);
+            renderer.write_prompt(choose_prompt)?;
             let position = renderer.get_position();
 
-            renderer.write_line(&full_input.input);
+            renderer.write_line(&full_input.input)?;
 
-            for (idx, &item) in full_input.predictions.iter().enumerate() {
+            for (idx, item) in full_input.predictions.iter().enumerate() {
                 let is_selected = match &full_input.selected {
                     Some(s) => s.idx == idx,
                     None => false
                 };
-                renderer.write_selection_item(&item.to_string(), is_selected);
+                renderer.write_selection_item(&item.to_string(), is_selected)?;
             }
 
             let end_position = renderer.get_position();
-            renderer.move_cursor_to(&position.with_x(position.x + full_input.input.len()));
+            renderer.move_cursor_to(&position.with_x(position.x + full_input.input.len()))?;
 
-            renderer.term.show_cursor().unwrap();
-            match renderer.term.read_key().unwrap()
+            renderer.term.show_cursor()?;
+            let key = loop {
+                if let Some(key) = windows_input::try_read_single_key()? {
+                    break key;
+                }
+
+                if self.handle_received_items() {
+                    if self.fill_predictions(&mut full_input) {
+                        renderer.term.hide_cursor()?;
+                        renderer.move_cursor_to(&end_position)?;
+                        continue 'outer;
+                    }
+                }
+
+                sleep(Duration::from_millis(10));
+            };
+            match key
             {
                 Key::Char(char) => {
                     full_input.input.insert(full_input.cursor, char);
@@ -64,8 +86,8 @@ impl<T> Dialogue<T> where T: Display, T: Eq {
                     }
                 }
                 Key::Escape => {
-                    renderer.move_cursor_to(&end_position);
-                    return None;
+                    renderer.move_cursor_to(&end_position)?;
+                    return Ok(None);
                 }
                 Key::ArrowLeft => {
                     if full_input.cursor > 0 {
@@ -89,7 +111,7 @@ impl<T> Dialogue<T> where T: Display, T: Eq {
 
                         full_input.selected = Some(Selected {
                             idx: next_idx,
-                            item: full_input.predictions.get(next_idx).unwrap(),
+                            item: full_input.predictions.get(next_idx).unwrap().clone(),
                         })
                     }
                 }
@@ -105,17 +127,17 @@ impl<T> Dialogue<T> where T: Display, T: Eq {
 
                         full_input.selected = Some(Selected {
                             idx: next_idx,
-                            item: full_input.predictions.get(next_idx).unwrap(),
+                            item: full_input.predictions.get(next_idx).unwrap().clone(),
                         })
                     }
                 }
                 Key::Enter => {
                     match full_input.selected {
                         Some(selection) => {
-                            renderer.move_cursor_to(&end_position);
-                            renderer.clear();
-                            renderer.write_successful("Choose: ", selection.item);
-                            return Some(selection.item);
+                            renderer.move_cursor_to(&end_position)?;
+                            renderer.clear()?;
+                            renderer.write_successful("Choose: ", &selection.item)?;
+                            return Ok(Some(selection.item.clone()));
                         }
                         None => {}
                     }
@@ -124,8 +146,8 @@ impl<T> Dialogue<T> where T: Display, T: Eq {
                 _ => {}
             }
 
-            renderer.term.hide_cursor().unwrap();
-            renderer.move_cursor_to(&end_position);
+            renderer.term.hide_cursor()?;
+            renderer.move_cursor_to(&end_position)?;
         }
     }
 
@@ -135,44 +157,77 @@ impl<T> Dialogue<T> where T: Display, T: Eq {
         }
     }
 
-    fn fill_predictions<'a>(&'a self, input: &mut CurrentInput<'a, T>) {
+    /// We want to rerender stuff as little as possible, so this returns whether the predictions actually changed
+    fn fill_predictions(&self, input: &mut CurrentInput<T>) -> bool {
         let predictions = &mut input.predictions;
 
         // TODO: do we *really* need to allocate a heap here?
-        let mut binary_heap = BinaryHeap::with_capacity(input.max_predictions);
+        // This should be a min-heap cause we want the top scores here
+        let mut binary_heap = BinaryHeap::<Reverse<Prediction<T>>>::with_capacity(input.max_predictions);
 
         let items = self.items.iter().map(|i| (i, input.matcher.fuzzy_match(&format!("{}", i), &input.input)));
         for (item, score) in items {
             match score {
                 Some(score) =>
-                    binary_heap.push(Prediction { score, item }),
+                    if binary_heap.len() < input.max_predictions {
+                        binary_heap.push(Reverse(Prediction { score, item }));
+                    } else {
+                        if let Some(min_element) = binary_heap.peek() {
+                            if score > min_element.0.score {
+                                binary_heap.pop();
+                                binary_heap.push(Reverse(Prediction { score, item }));
+                            }
+                        }
+                    },
                 _ => {}
             }
-
-            if binary_heap.len() > input.max_predictions { binary_heap.pop(); }
         }
 
-        predictions.clear();
-        for prediction in binary_heap {
-            predictions.push(prediction.item);
+        let same_size = binary_heap.len() == predictions.len();
+        if !same_size {
+            predictions.clear();
         }
+        let mut changed = false;
+        for (idx, reverse_prediction) in binary_heap.iter().rev().enumerate() {
+            let prediction = &reverse_prediction.0;
+            if let Some(cur) = predictions.get(idx) {
+                if cur == prediction.item {
+                    continue;
+                }
+            }
+
+            let len = predictions.len();
+            if idx < len {
+                let _ = mem::replace(&mut predictions[idx], prediction.item.clone());
+            } else {
+                predictions.push(prediction.item.clone());
+            }
+            changed = true;
+        }
+
+        if !changed {
+            return false;
+        }
+
+        input.selected = self.get_new_selected(input);
+        return true;
     }
 
-    fn get_new_selected<'a>(&self, input: &CurrentInput<'a, T>) -> Option<Selected<'a, T>> {
+    fn get_new_selected(&self, input: &CurrentInput<T>) -> Option<Selected<T>> {
         match &input.selected {
             Some(selected) => {
-                if let Some(position) = input.predictions.iter().position(|x| **x == *selected.item) {
+                if let Some(position) = input.predictions.iter().position(|x| *x == selected.item) {
                     // If the same item is there, we preserve the selection of the item
                     return Some(Selected {
                         idx: position,
-                        item: selected.item,
+                        item: selected.item.clone(),
                     });
                 }
                 if selected.idx < input.predictions.len() {
                     // If the same position is there, we preserve the selection of the position
                     return Some(Selected {
                         idx: selected.idx,
-                        item: input.predictions.get(selected.idx).unwrap(),
+                        item: input.predictions.get(selected.idx)?.clone(),
                     });
                 }
             }
@@ -183,10 +238,20 @@ impl<T> Dialogue<T> where T: Display, T: Eq {
             // Select the first thing if nothing is selected
             return Some(Selected {
                 idx: 0,
-                item: input.predictions.first().unwrap(),
+                item: input.predictions.first()?.clone(),
             });
         }
         return None;
+    }
+
+    fn handle_received_items(&mut self) -> bool {
+        let mut added = false;
+        let events = self.additional_items_receiver.try_iter();
+        for event in events {
+            self.items.push(event.deref().clone());
+            added = true;
+        }
+        return added;
     }
 }
 
@@ -215,13 +280,13 @@ impl<'a, T> Ord for Prediction<'a, T> {
     }
 }
 
-struct CurrentInput<'a, T> {
+struct CurrentInput<T> {
     input: String,
     cursor: usize,
-    predictions: Vec<&'a T>,
+    predictions: Vec<T>,
     max_predictions: usize,
     matcher: SkimMatcherV2,
-    selected: Option<Selected<'a, T>>,
+    selected: Option<Selected<T>>,
 }
 
 struct Renderer {
@@ -230,9 +295,9 @@ struct Renderer {
     cursor_position: RendererPosition,
 }
 
-struct Selected<'a, T> {
+struct Selected<T> {
     idx: usize,
-    item: &'a T,
+    item: T,
 }
 
 impl Renderer {
@@ -248,47 +313,54 @@ impl Renderer {
         return self.cursor_position.clone();
     }
 
-    fn move_cursor_to(&mut self, position: &RendererPosition) {
+    fn move_cursor_to(&mut self, position: &RendererPosition) -> io::Result<()> {
         if self.cursor_position.y > position.y {
-            self.term.move_cursor_up(self.cursor_position.y - position.y).unwrap();
+            self.term.move_cursor_up(self.cursor_position.y - position.y)?;
         } else {
-            self.term.move_cursor_down(position.y - self.cursor_position.y).unwrap();
+            self.term.move_cursor_down(position.y - self.cursor_position.y)?;
         }
 
-        self.term.move_cursor_right(position.x).unwrap();
+        self.term.move_cursor_right(position.x)?;
         self.cursor_position = position.clone();
+        Ok(())
     }
 
-    fn clear(&mut self) {
-        self.term.clear_last_lines(self.lines_number).unwrap();
+    fn clear(&mut self) -> io::Result<()> {
+        self.term.clear_last_lines(self.lines_number)?;
         self.lines_number = 0;
         self.cursor_position = RendererPosition::zero();
+        Ok(())
     }
 
-    fn write_line(&mut self, message: &str) {
-        self.term.write_line(message).unwrap();
+    fn write_line(&mut self, message: &str) -> io::Result<()> {
+        self.term.write_line(message)?;
         self.lines_number += 1;
         self.cursor_position.x = 0;
         self.cursor_position.y += 1;
+
+        Ok(())
     }
 
-    fn write_line_formatted<T: Display>(&mut self, styled_object: StyledObject<T>) {
-        self.write_formatted(styled_object);
-        self.term.write_line("").unwrap();
+    fn write_line_formatted<T: Display>(&mut self, styled_object: StyledObject<T>) -> io::Result<()> {
+        self.write_formatted(styled_object)?;
+        self.term.write_line("")?;
         self.lines_number += 1;
         self.cursor_position.x = 0;
         self.cursor_position.y += 1;
+
+        Ok(())
     }
 
-    fn write(&mut self, message: &str) {
-        self.term.write(message.as_bytes()).unwrap();
+    fn write(&mut self, message: &str) -> io::Result<()> {
+        self.term.write(message.as_bytes())?;
+        Ok(())
     }
 
-    fn write_formatted<T: Display>(&mut self, styled_object: StyledObject<T>) {
-        self.write(styled_object.to_string().as_str());
+    fn write_formatted<T: Display>(&mut self, styled_object: StyledObject<T>) -> io::Result<()> {
+        self.write(styled_object.to_string().as_str())
     }
 
-    fn write_selection_item(&mut self, item: &str, selected: bool) {
+    fn write_selection_item(&mut self, item: &str, selected: bool) -> io::Result<()> {
         let padding_left = 3;
         let styled_message = if selected {
             let prefix = style("❯").green().to_string() + (0..padding_left - 1).map(|_| " ").collect::<String>().as_str();
@@ -301,21 +373,21 @@ impl Renderer {
         };
 
         self.cursor_position.x = self.cursor_position.x + padding_left + item.len();
-        self.write_line_formatted(styled_message);
+        self.write_line_formatted(styled_message)
     }
 
-    fn write_prompt(&mut self, prompt: &str) {
+    fn write_prompt(&mut self, prompt: &str) -> io::Result<()> {
         let padding_left = 3;
         let prefix = style("?").yellow().to_string() + (0..padding_left - 1).map(|_| " ").collect::<String>().as_str();
         self.cursor_position.x = self.cursor_position.x + padding_left + prompt.len();
-        self.write_formatted(style(prefix + prompt).bold());
+        self.write_formatted(style(prefix + prompt).bold())
     }
 
-    pub fn write_successful<T>(&mut self, successful_message: &str, item: &T) where T: Display {
+    pub fn write_successful<T>(&mut self, successful_message: &str, item: &T) -> io::Result<()> where T: Display {
         let padding_left = 3;
         let prefix = style("✔").yellow().to_string() + (0..padding_left - 1).map(|_| " ").collect::<String>().as_str();
         self.cursor_position.x = self.cursor_position.x + padding_left + successful_message.len() + item.to_string().len();
-        self.write_formatted(style(prefix + successful_message + item.to_string().as_str()).bold());
+        self.write_formatted(style(prefix + successful_message + item.to_string().as_str()).bold())
     }
 }
 
