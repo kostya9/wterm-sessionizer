@@ -1,11 +1,20 @@
-
-use clap::{Parser, Subcommand};
-use dialoguer::{console::Term, theme::ColorfulTheme, FuzzySelect};
-use indicatif::{ProgressBar, ProgressStyle};
-use path_absolutize::Absolutize;
+use mpsc::channel;
+use std::{self, fs, thread};
+use std::fmt::{Display, Formatter};
 use std::os::windows::prelude::*;
 use std::path::{Path, PathBuf};
-use std::{self, fs};
+use std::sync::mpsc;
+use std::sync::mpsc::Sender;
+
+use clap::{Parser, Subcommand};
+use path_absolutize::Absolutize;
+
+use crate::dialogue::dialogue_ui::Dialogue;
+use crate::dialogue::dialogue_ui::DialogueMessage;
+use crate::dialogue::dialogue_ui::{DialogueMessage::ItemsFound, DialogueMessage::ProgressUpdate};
+use crate::dialogue::dialogue_ui::DialogueMessage::Finish;
+
+mod dialogue;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -57,62 +66,35 @@ fn main() -> Result<()> {
 }
 
 fn find_project(path: String, new_tab: bool) -> Result<()> {
-    let path = std::path::Path::new(&path);
-    
-    let spinner = ProgressBar::new_spinner();
-    spinner.set_style(
-        ProgressStyle::with_template("[{elapsed_precise}] {spinner}\n{msg}")
-            .unwrap()
-            .tick_strings(&["Searching", "Searching.", "Searching..", "Searching...", ""]),
-    );
-    let mut updater = Updater::new(&spinner);
-    let repo_paths = get_repository_paths(path, &mut updater);
-    let repos = repo_paths
-        .into_iter()
-        .map(|p| {
-            let details = get_repo_info(&p);
-            let full_path = to_full_path(&p);
-            return RepoInfo {
-                path: full_path,
-                detailed_repo_info: details,
-            };
-        })
-        .collect::<Vec<_>>();
+    let (tx, rx) = channel::<DialogueMessage<RepoInfo>>();
+    thread::spawn(move || {
+        let path = Path::new(&path);
 
-    spinner.finish();
+        let mut updater = Updater::new(&tx);
+        let repos = get_repository_paths(path, &mut updater);
+        tx.send(Finish).unwrap();
+        return repos;
+    });
 
-    if repos.len() == 0 {
-        println!("Couldnt find repos in the current directory");
-        return Ok(());
-    }
+    let mut selection = Dialogue::new(rx)
+        .prompt("Select repository")
+        .interact();
 
-    let full_paths_repos = repos
-        .iter()
-        .map(|a| {
-            let emoji = match a.detailed_repo_info.first() {
-                None => "",
-                Some(DetailedRepoInfo::NpmProject) => " [js]",
-                Some(DetailedRepoInfo::CsharpProject) => " [csharp]",
-                Some(DetailedRepoInfo::GoProject) => " [go]",
-                Some(DetailedRepoInfo::RustProject) => " [rust]",
-            };
-
-            return a.path.clone() + emoji;
-        })
-        .collect::<Vec<_>>();
-
-    let selection = FuzzySelect::with_theme(&ColorfulTheme::default())
-        .items(&full_paths_repos)
-        .default(0)
-        .with_prompt("Select repository")
-        .interact_on_opt(&Term::stderr())?;
-
-    if let Some(selected_idx) = selection {
-        let selected = &repos[selected_idx].path;
+    if let Ok(Some(selected_repo)) = selection {
+        let selected = &selected_repo.path;
         open_tab(selected, new_tab);
     }
 
     return Ok(());
+}
+
+fn path_to_repo(p: &PathBuf) -> RepoInfo {
+    let details = get_repo_info(&p);
+    let full_path = to_full_path(&p);
+    return RepoInfo {
+        path: full_path,
+        detailed_repo_info: details,
+    };
 }
 
 fn open_tab(directory: &String, new_tab: bool) {
@@ -151,7 +133,7 @@ fn is_valid_repository_candidate(dir_entry: &fs::DirEntry) -> bool {
     }
 }
 
-fn get_repository_paths(path: &std::path::Path, updater: &mut Updater) -> Vec<PathBuf> {
+fn get_repository_paths(path: &std::path::Path, updater: &mut Updater) -> Vec<RepoInfo> {
     let mut result = Vec::new();
     let mut traverse_queue = Vec::new();
     traverse_queue.push(PathBuf::from(path));
@@ -176,7 +158,9 @@ fn get_repository_paths(path: &std::path::Path, updater: &mut Updater) -> Vec<Pa
                 }
 
                 if is_repo {
-                    result.push(popped);
+                    let repo = path_to_repo(&popped);
+                    updater.on_new_repo(&repo);
+                    result.push(repo);
                     continue;
                 }
 
@@ -196,11 +180,37 @@ fn get_repository_paths(path: &std::path::Path, updater: &mut Updater) -> Vec<Pa
     result
 }
 
+
+#[derive(Clone)]
 struct RepoInfo {
     path: String,
     detailed_repo_info: Vec<DetailedRepoInfo>,
 }
 
+impl PartialEq<Self> for RepoInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.path.eq(&other.path)
+    }
+}
+
+impl Eq for RepoInfo {}
+
+impl Display for RepoInfo {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let emoji = match self.detailed_repo_info.first() {
+            None => "",
+            Some(DetailedRepoInfo::NpmProject) => " [js]",
+            Some(DetailedRepoInfo::CsharpProject) => " [csharp]",
+            Some(DetailedRepoInfo::GoProject) => " [go]",
+            Some(DetailedRepoInfo::RustProject) => " [rust]",
+        };
+
+        let display = self.path.clone() + emoji;
+        return f.write_str(&display);
+    }
+}
+
+#[derive(Clone)]
 enum DetailedRepoInfo {
     CsharpProject,
     NpmProject,
@@ -237,12 +247,16 @@ fn get_repo_info(path: &PathBuf) -> Vec<DetailedRepoInfo> {
 }
 
 struct Updater<'a> {
-    bar: &'a ProgressBar,
+    sender: &'a Sender<DialogueMessage<RepoInfo>>,
     last_updated: Option<std::time::Instant>,
 }
 
 impl<'a> Updater<'a> {
-    fn update_current(&mut self, string: &std::path::PathBuf) {
+    pub(crate) fn on_new_repo(&self, repo: &RepoInfo) {
+        self.sender.send(ItemsFound(vec![repo.clone()])).unwrap()
+    }
+
+    fn update_current(&mut self, folder: &PathBuf) {
         if let Some(last_updated) = self.last_updated {
             let now = std::time::Instant::now();
             let delta = now - last_updated;
@@ -251,15 +265,14 @@ impl<'a> Updater<'a> {
             }
         }
 
-        self.bar.tick();
-        self.bar
-            .set_message(string.clone().into_os_string().into_string().unwrap());
+        let displayPath = folder.to_str().unwrap();
+        self.sender.send(ProgressUpdate(format!("Last found directory:{displayPath}").into_boxed_str())).unwrap();
         self.last_updated = Some(std::time::Instant::now());
     }
 
-    fn new(spinner: &ProgressBar) -> Updater {
+    fn new(spinner: &Sender<DialogueMessage<RepoInfo>>) -> Updater {
         Updater {
-            bar: spinner,
+            sender: spinner,
             last_updated: None,
         }
     }

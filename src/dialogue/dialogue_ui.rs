@@ -13,7 +13,7 @@ use dialoguer::console::Term;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 
-mod windows_input;
+use crate::dialogue::windows_input;
 
 pub enum DialogueMessage<T> {
     ProgressUpdate(Box<str>),
@@ -25,11 +25,17 @@ pub struct Dialogue<T> {
     items: Vec<T>,
     additional_items_receiver: Receiver<DialogueMessage<T>>,
     current_progress: Option<String>,
+    prompt: String,
 }
 
 impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
     pub fn new(receiver: Receiver<DialogueMessage<T>>) -> Dialogue<T> {
-        Dialogue { items: vec![], additional_items_receiver: receiver, current_progress: None }
+        Dialogue { items: vec![], additional_items_receiver: receiver, current_progress: None, prompt: "".to_string() }
+    }
+
+    pub fn prompt(&mut self, str: &str) -> &mut Dialogue<T> {
+        self.prompt = str.to_string();
+        return self;
     }
 
     pub fn interact(&mut self) -> io::Result<Option<T>> {
@@ -407,7 +413,7 @@ impl Renderer {
         let padding_left = 3;
         let prefix = style("✔").yellow().to_string() + (0..padding_left - 1).map(|_| " ").collect::<String>().as_str();
         self.cursor_position.x = self.cursor_position.x + padding_left + successful_message.len() + item.to_string().len();
-        self.write_formatted(style(prefix + successful_message + item.to_string().as_str()).bold())
+        self.write_line_formatted(style(prefix + successful_message + item.to_string().as_str()).bold())
     }
 
     pub fn write_progress(&mut self, progress: &str) -> io::Result<()> {
