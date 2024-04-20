@@ -15,14 +15,21 @@ use fuzzy_matcher::skim::SkimMatcherV2;
 
 mod windows_input;
 
+pub enum DialogueMessage<T> {
+    ProgressUpdate(Box<str>),
+    ItemsFound(Vec<T>),
+    Finish,
+}
+
 pub struct Dialogue<T> {
     items: Vec<T>,
-    additional_items_receiver: Receiver<Box<T>>,
+    additional_items_receiver: Receiver<DialogueMessage<T>>,
+    current_progress: Option<String>,
 }
 
 impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
-    pub fn new(receiver: Receiver<Box<T>>) -> Dialogue<T> {
-        Dialogue { items: vec![], additional_items_receiver: receiver }
+    pub fn new(receiver: Receiver<DialogueMessage<T>>) -> Dialogue<T> {
+        Dialogue { items: vec![], additional_items_receiver: receiver, current_progress: None }
     }
 
     pub fn interact(&mut self) -> io::Result<Option<T>> {
@@ -31,7 +38,7 @@ impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
             cursor: 0,
             input: "".to_string(),
             predictions: vec![],
-            max_predictions: 20,
+            max_predictions: 10,
             matcher: SkimMatcherV2::default().ignore_case(),
             selected: None,
         };
@@ -39,6 +46,13 @@ impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
         'outer: loop {
             self.fill_predictions(&mut full_input);
             renderer.clear()?;
+
+            match &self.current_progress {
+                Some(progress) => {
+                    renderer.write_progress(&progress)?;
+                }
+                None => {}
+            }
 
             let choose_prompt = "Choose: ";
             renderer.write_prompt(choose_prompt)?;
@@ -64,11 +78,10 @@ impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
                 }
 
                 if self.handle_received_items() {
-                    if self.fill_predictions(&mut full_input) {
-                        renderer.term.hide_cursor()?;
-                        renderer.move_cursor_to(&end_position)?;
-                        continue 'outer;
-                    }
+                    self.fill_predictions(&mut full_input);
+                    renderer.term.hide_cursor()?;
+                    renderer.move_cursor_to(&end_position)?;
+                    continue 'outer;
                 }
 
                 sleep(Duration::from_millis(10));
@@ -157,8 +170,7 @@ impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
         }
     }
 
-    /// We want to rerender stuff as little as possible, so this returns whether the predictions actually changed
-    fn fill_predictions(&self, input: &mut CurrentInput<T>) -> bool {
+    fn fill_predictions(&self, input: &mut CurrentInput<T>) {
         let predictions = &mut input.predictions;
 
         // TODO: do we *really* need to allocate a heap here?
@@ -187,7 +199,6 @@ impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
         if !same_size {
             predictions.clear();
         }
-        let mut changed = false;
         for (idx, reverse_prediction) in binary_heap.iter().rev().enumerate() {
             let prediction = &reverse_prediction.0;
             if let Some(cur) = predictions.get(idx) {
@@ -202,15 +213,9 @@ impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
             } else {
                 predictions.push(prediction.item.clone());
             }
-            changed = true;
-        }
-
-        if !changed {
-            return false;
         }
 
         input.selected = self.get_new_selected(input);
-        return true;
     }
 
     fn get_new_selected(&self, input: &CurrentInput<T>) -> Option<Selected<T>> {
@@ -245,13 +250,28 @@ impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
     }
 
     fn handle_received_items(&mut self) -> bool {
-        let mut added = false;
+        let mut changed = false;
         let events = self.additional_items_receiver.try_iter();
         for event in events {
-            self.items.push(event.deref().clone());
-            added = true;
+            match event {
+                DialogueMessage::ItemsFound(items) => {
+                    for item in items {
+                        self.items.push(item);
+                    }
+                    changed = true;
+                }
+                DialogueMessage::ProgressUpdate(message) => {
+                    self.current_progress = Some(message.deref().to_string());
+                    changed = true;
+                }
+                DialogueMessage::Finish => {
+                    self.current_progress = None;
+                    changed = true;
+                }
+                _ => {}
+            }
         }
-        return added;
+        return changed;
     }
 }
 
@@ -388,6 +408,12 @@ impl Renderer {
         let prefix = style("✔").yellow().to_string() + (0..padding_left - 1).map(|_| " ").collect::<String>().as_str();
         self.cursor_position.x = self.cursor_position.x + padding_left + successful_message.len() + item.to_string().len();
         self.write_formatted(style(prefix + successful_message + item.to_string().as_str()).bold())
+    }
+
+    pub fn write_progress(&mut self, progress: &str) -> io::Result<()> {
+        let padding_left = 3;
+        let prefix = style("🕑").yellow().to_string() + (0..padding_left - 2).map(|_| " ").collect::<String>().as_str();
+        self.write_line_formatted(style(prefix + progress))
     }
 }
 

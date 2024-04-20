@@ -58,7 +58,7 @@ fn main() -> Result<()> {
 
 fn find_project(path: String, new_tab: bool) -> Result<()> {
     let path = std::path::Path::new(&path);
-
+    
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
         ProgressStyle::with_template("[{elapsed_precise}] {spinner}\n{msg}")
