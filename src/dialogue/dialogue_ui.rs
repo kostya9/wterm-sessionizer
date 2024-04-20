@@ -13,7 +13,7 @@ use dialoguer::console::Term;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 
-use crate::dialogue::windows_input;
+use super::windows_input;
 
 pub enum DialogueMessage<T> {
     ProgressUpdate(Box<str>),
