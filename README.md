@@ -12,7 +12,7 @@ c:\repo2 [csharp]
 
 ## Installation:
 ```
-cargo install wterm-sessionizer --version 0.0.12-alpha
+cargo install wterm-sessionizer --version 0.0.14-alpha
 ```
 
 Add to your powershell profile
@@ -20,3 +20,6 @@ Add to your powershell profile
 ```pwsh
 @((wts init) -join "`n") | Invoke-Expression
 ```
+
+> [!IMPORTANT]
+> Add the powershell profile code AFTER the prompt modifiers like oh-my-posh so that they won't overwrite the custom logic of wts.

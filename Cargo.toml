@@ -1,6 +1,6 @@
 [package]
 name = "wterm-sessionizer"
-version = "0.0.13-alpha"
+version = "0.0.14-alpha"
 authors = ["Kostiantyn Sharovarskyi <services@sharovarskyi.com>"]
 license = "MIT"
 description = "Tool to open repos in another folder"
@@ -18,10 +18,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.4.2", features = ["derive"] }
-dialoguer = { version = "0.11.0", features = ["fuzzy-select"] }
-encode_unicode = "1.0.0"
-fuzzy-matcher = "0.3.7"
+dialoguer = { version = "0.10.3", features = ["fuzzy-select"] }
 indicatif = "0.17.3"
 path-absolutize = "3.0.14"
 shellexpand = "3.1.0"
-windows-sys = { version = "0.52.0", features = ["Win32_UI_Input", "Win32_Foundation", "Win32_System_Console", "Win32_UI_Input_KeyboardAndMouse"] }
