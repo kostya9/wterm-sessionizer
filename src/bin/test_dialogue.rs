@@ -2,11 +2,11 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use crate::dialogue_ui::{Dialogue, DialogueMessage};
-use crate::dialogue_ui::DialogueMessage::{Finish, ItemsFound, ProgressUpdate};
+use crate::dialogue::dialogue_ui::{Dialogue, DialogueMessage};
+use crate::dialogue::dialogue_ui::DialogueMessage::{Finish, ItemsFound, ProgressUpdate};
 
-#[path = "../dialogue/dialogue_ui.rs"]
-mod dialogue_ui;
+#[path = "../dialogue/mod.rs"]
+mod dialogue;
 
 fn main() {
     let (tx, rx) = mpsc::channel::<DialogueMessage<String>>();
