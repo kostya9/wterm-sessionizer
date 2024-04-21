@@ -364,13 +364,24 @@ impl Renderer {
     }
 
     fn trimmed_max_size(&self, input: &str, max_width: usize) -> String {
-        if input.len() > max_width {
-            let (left, right) = input.split_at(max_width - 3);
-            return left.to_string() + "...";
+        // We need to split on character boundaries, so we deal in characters here.
+        let padding_str = "...";
+        let padding_char_length = padding_str.len();
+        let length = input.char_indices().count();
+
+        if length < max_width {
+            return input.to_string();
         }
 
-        return input.to_string();
+        if length <= padding_char_length {
+            return input.to_string();
+        }
+
+        let last_writable_index = input.char_indices().nth(max_width - 3).unwrap().0;
+        let (left, _) = input.split_at(last_writable_index);
+        return left.to_string() + padding_str;
     }
+
     fn write_line(&mut self, message: &str) -> io::Result<()> {
         self.term.write_line(message)?;
         self.lines_number += 1;
