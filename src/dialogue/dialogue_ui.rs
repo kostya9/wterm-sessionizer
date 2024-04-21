@@ -219,13 +219,6 @@ impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
                         item: selected.item.clone(),
                     });
                 }
-                if selected.idx < input.predictions.len() {
-                    // If the same position is there, we preserve the selection of the position
-                    return Some(Selected {
-                        idx: selected.idx,
-                        item: input.predictions.get(selected.idx)?.item.clone(),
-                    });
-                }
             }
             None => {}
         };
