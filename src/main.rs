@@ -12,7 +12,7 @@ use path_absolutize::Absolutize;
 use crate::dialogue::dialogue_ui::Dialogue;
 use crate::dialogue::dialogue_ui::DialogueMessage;
 use crate::dialogue::dialogue_ui::{DialogueMessage::ItemsFound, DialogueMessage::ProgressUpdate};
-use crate::dialogue::dialogue_ui::DialogueMessage::Finish;
+use crate::dialogue::dialogue_ui::DialogueMessage::{Finish, ForceShutdown};
 
 mod dialogue;
 
@@ -67,14 +67,18 @@ fn main() -> Result<()> {
 
 fn find_project(path: String, new_tab: bool) -> Result<()> {
     let (tx, rx) = channel::<DialogueMessage<RepoInfo>>();
+    let search_sender = tx.clone();
     thread::spawn(move || {
         let path = Path::new(&path);
 
-        let mut updater = Updater::new(&tx);
+        let mut updater = Updater::new(&search_sender);
         let repos = get_repository_paths(path, &mut updater);
-        tx.send(Finish).unwrap();
+        search_sender.send(Finish).unwrap();
         return repos;
     });
+
+    let ctrlc_sender = tx.clone();
+    ctrlc::set_handler(move || ctrlc_sender.send(ForceShutdown).unwrap())?;
 
     let mut selection = Dialogue::new(rx)
         .prompt("Select repository")

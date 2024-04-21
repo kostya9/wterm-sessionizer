@@ -14,14 +14,14 @@ fn main() {
         let mut i = 0;
         loop {
             let str = i.to_string();
-            tx.send(ItemsFound(vec![str]));
-            tx.send(ProgressUpdate(format!("Found {i}...").into_boxed_str()));
+            tx.send(ItemsFound(vec![str])).unwrap();
+            tx.send(ProgressUpdate(format!("Found {i}...").into_boxed_str())).unwrap();
 
             thread::sleep(Duration::from_secs(1));
             i += 1;
 
             if i > 20 {
-                tx.send(Finish);
+                tx.send(Finish).unwrap();
                 break;
             }
         }

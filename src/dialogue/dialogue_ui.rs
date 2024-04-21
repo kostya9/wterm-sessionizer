@@ -1,7 +1,7 @@
-use std::{io, mem};
-use std::cmp::{Ordering, Reverse};
+use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::fmt::{Display, Formatter};
+use std::io;
 use std::io::Write;
 use std::ops::Deref;
 use std::sync::mpsc::Receiver;
@@ -13,7 +13,6 @@ use dialoguer::console::Term;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use indicatif::TermLike;
-use windows_sys::Win32::Foundation::ERROR_QUORUM_NOT_ALLOWED_IN_THIS_GROUP;
 
 use super::windows_input;
 
@@ -21,6 +20,7 @@ pub enum DialogueMessage<T> {
     ProgressUpdate(Box<str>),
     ItemsFound(Vec<T>),
     Finish,
+    ForceShutdown,
 }
 
 pub struct Dialogue<T> {
@@ -28,11 +28,12 @@ pub struct Dialogue<T> {
     additional_items_receiver: Receiver<DialogueMessage<T>>,
     current_progress: Option<String>,
     prompt: String,
+    force_shutdown: bool,
 }
 
 impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
     pub fn new(receiver: Receiver<DialogueMessage<T>>) -> Dialogue<T> {
-        Dialogue { items: vec![], additional_items_receiver: receiver, current_progress: None, prompt: "".to_string() }
+        Dialogue { items: vec![], additional_items_receiver: receiver, current_progress: None, prompt: "".to_string(), force_shutdown: false }
     }
 
     pub fn prompt(&mut self, str: &str) -> &mut Dialogue<T> {
@@ -54,6 +55,11 @@ impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
         'outer: loop {
             self.fill_predictions(&mut full_input);
             renderer.clear()?;
+
+            if self.force_shutdown {
+                renderer.term.show_cursor()?;
+                return Ok(None);
+            }
 
             match &self.current_progress {
                 Some(progress) => {
@@ -87,7 +93,6 @@ impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
                 }
 
                 if self.handle_received_items() {
-                    self.fill_predictions(&mut full_input);
                     renderer.term.hide_cursor()?;
                     renderer.move_cursor_to(&end_position)?;
                     continue 'outer;
@@ -166,7 +171,6 @@ impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
                         None => {}
                     }
                 }
-
                 _ => {}
             }
 
@@ -252,7 +256,10 @@ impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
                     self.current_progress = None;
                     changed = true;
                 }
-                _ => {}
+                DialogueMessage::ForceShutdown => {
+                    self.force_shutdown = true;
+                    changed = true;
+                }
             }
         }
         return changed;
