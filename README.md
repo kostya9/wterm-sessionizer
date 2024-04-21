@@ -12,7 +12,7 @@ c:\repo2 [csharp]
 
 ## Installation:
 ```
-cargo install wterm-sessionizer --version 0.0.17-alpha
+cargo install wterm-sessionizer --version 0.0.18-alpha
 ```
 
 Add to your powershell profile

@@ -415,8 +415,8 @@ impl Renderer {
 
         let item = self.trimmed_max_size(item, (self.term.width() - padding_left) as usize);
         let styled_message = if selected {
-            let prefix = style("❯").green().to_string() + (0..padding_left - 1).map(|_| " ").collect::<String>().as_str();
-            let item = prefix + style(&item).blue().to_string().as_str();
+            let prefix = style("❯").for_stderr().green().to_string() + (0..padding_left - 1).map(|_| " ").collect::<String>().as_str();
+            let item = prefix + style(&item).for_stderr().cyan().to_string().as_str();
             style(item).bold()
         } else {
             let prefix = (0..padding_left).map(|_| " ").collect::<String>();
@@ -430,23 +430,23 @@ impl Renderer {
 
     fn write_prompt(&mut self, prompt: &str) -> io::Result<()> {
         let padding_left = 3;
-        let prefix = style("?").yellow().to_string() + (0..padding_left - 1).map(|_| " ").collect::<String>().as_str();
+        let prefix = style("?").for_stderr().yellow().to_string() + (0..padding_left - 1).map(|_| " ").collect::<String>().as_str();
         self.cursor_position.x = self.cursor_position.x + padding_left + prompt.len();
         self.write_formatted(style(prefix + prompt).bold())
     }
 
     pub fn write_successful<T>(&mut self, successful_message: &str, item: &T) -> io::Result<()> where T: Display {
         let padding_left = 3;
-        let prefix = style("✔").yellow().to_string() + (0..padding_left - 1).map(|_| " ").collect::<String>().as_str();
+        let prefix = style("✔").for_stderr().yellow().to_string() + (0..padding_left - 1).map(|_| " ").collect::<String>().as_str();
         self.cursor_position.x = self.cursor_position.x + padding_left + successful_message.len() + item.to_string().len();
-        self.write_line_formatted(style(prefix + successful_message + item.to_string().as_str()).bold())
+        self.write_line_formatted(style(prefix + successful_message + item.to_string().as_str()).for_stderr().bold())
     }
 
     pub fn write_progress(&mut self, progress: &str) -> io::Result<()> {
         let padding_left = 3;
         let progress = self.trimmed_max_size(progress, (self.term.width() - padding_left) as usize);
-        let prefix = style("🕑").yellow().to_string() + (0..padding_left - 2).map(|_| " ").collect::<String>().as_str();
-        self.write_line_formatted(style(prefix + &progress))
+        let prefix = style("🕑").for_stderr().yellow().to_string() + (0..padding_left - 2).map(|_| " ").collect::<String>().as_str();
+        self.write_line_formatted(style(prefix + &progress).for_stderr())
     }
 
     pub fn get_max_input_size(&self) -> usize {
