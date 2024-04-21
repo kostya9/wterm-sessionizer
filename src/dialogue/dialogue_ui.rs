@@ -12,6 +12,8 @@ use dialoguer::console::{Key, style, StyledObject};
 use dialoguer::console::Term;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
+use indicatif::TermLike;
+use windows_sys::Win32::Foundation::ERROR_QUORUM_NOT_ALLOWED_IN_THIS_GROUP;
 
 use super::windows_input;
 
@@ -55,13 +57,14 @@ impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
 
             match &self.current_progress {
                 Some(progress) => {
-                    renderer.write_progress(&progress)?;
+                    renderer.write_progress(progress)?;
                 }
                 None => {}
             }
 
-            let choose_prompt = "Choose: ";
-            renderer.write_prompt(choose_prompt)?;
+            let prompt = &self.prompt.clone();
+            let choose_prompt = format!("{prompt}: ");
+            renderer.write_prompt(&choose_prompt)?;
             let position = renderer.get_position();
 
             renderer.write_line(&full_input.input)?;
@@ -95,8 +98,10 @@ impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
             match key
             {
                 Key::Char(char) => {
-                    full_input.input.insert(full_input.cursor, char);
-                    full_input.cursor += 1;
+                    if full_input.input.len() + prompt.len() < renderer.get_max_input_size() {
+                        full_input.input.insert(full_input.cursor, char);
+                        full_input.cursor += 1;
+                    }
                 }
                 Key::Backspace => {
                     if full_input.input.len() > 0 {
@@ -358,6 +363,14 @@ impl Renderer {
         Ok(())
     }
 
+    fn trimmed_max_size(&self, input: &str, max_width: usize) -> String {
+        if input.len() > max_width {
+            let (left, right) = input.split_at(max_width - 3);
+            return left.to_string() + "...";
+        }
+
+        return input.to_string();
+    }
     fn write_line(&mut self, message: &str) -> io::Result<()> {
         self.term.write_line(message)?;
         self.lines_number += 1;
@@ -368,7 +381,7 @@ impl Renderer {
     }
 
     fn write_line_formatted<T: Display>(&mut self, styled_object: StyledObject<T>) -> io::Result<()> {
-        self.write_formatted(styled_object)?;
+        self.term.write(styled_object.to_string().as_bytes())?;
         self.term.write_line("")?;
         self.lines_number += 1;
         self.cursor_position.x = 0;
@@ -388,17 +401,19 @@ impl Renderer {
 
     fn write_selection_item(&mut self, item: &str, selected: bool) -> io::Result<()> {
         let padding_left = 3;
+
+        let item = self.trimmed_max_size(item, (self.term.width() - padding_left) as usize);
         let styled_message = if selected {
             let prefix = style("❯").green().to_string() + (0..padding_left - 1).map(|_| " ").collect::<String>().as_str();
-            let item = prefix + style(item).blue().to_string().as_str();
+            let item = prefix + style(&item).blue().to_string().as_str();
             style(item).bold()
         } else {
             let prefix = (0..padding_left).map(|_| " ").collect::<String>();
-            let item = prefix + item;
+            let item = prefix + &item;
             style(item)
         };
 
-        self.cursor_position.x = self.cursor_position.x + padding_left + item.len();
+        self.cursor_position.x = self.cursor_position.x + padding_left as usize + item.len();
         self.write_line_formatted(styled_message)
     }
 
@@ -418,8 +433,14 @@ impl Renderer {
 
     pub fn write_progress(&mut self, progress: &str) -> io::Result<()> {
         let padding_left = 3;
+        let progress = self.trimmed_max_size(progress, (self.term.width() - padding_left) as usize);
         let prefix = style("🕑").yellow().to_string() + (0..padding_left - 2).map(|_| " ").collect::<String>().as_str();
-        self.write_line_formatted(style(prefix + progress))
+        self.write_line_formatted(style(prefix + &progress))
+    }
+
+    pub fn get_max_input_size(&self) -> usize {
+        let padding = 5;
+        return (self.term.width() - padding) as usize;
     }
 }
 
