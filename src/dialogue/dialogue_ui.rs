@@ -1,7 +1,7 @@
 use std::{io, mem};
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
-use std::fmt::Display;
+use std::fmt::{Display, Formatter};
 use std::io::Write;
 use std::ops::Deref;
 use std::sync::mpsc::Receiver;
@@ -135,7 +135,7 @@ impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
 
                         full_input.selected = Some(Selected {
                             idx: next_idx,
-                            item: full_input.predictions.get(next_idx).unwrap().clone(),
+                            item: full_input.predictions.get(next_idx).unwrap().item.clone(),
                         })
                     }
                 }
@@ -151,7 +151,7 @@ impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
 
                         full_input.selected = Some(Selected {
                             idx: next_idx,
-                            item: full_input.predictions.get(next_idx).unwrap().clone(),
+                            item: full_input.predictions.get(next_idx).unwrap().item.clone(),
                         })
                     }
                 }
@@ -182,23 +182,21 @@ impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
     }
 
     fn fill_predictions(&self, input: &mut CurrentInput<T>) {
-        let predictions = &mut input.predictions;
-
         // TODO: do we *really* need to allocate a heap here?
         // This should be a min-heap cause we want the top scores here
-        let mut binary_heap = BinaryHeap::<Reverse<Prediction<T>>>::with_capacity(input.max_predictions);
+        let mut binary_heap = BinaryHeap::<Prediction<T>>::with_capacity(input.max_predictions);
 
         let items = self.items.iter().map(|i| (i, input.matcher.fuzzy_match(&format!("{}", i), &input.input)));
         for (item, score) in items {
             match score {
                 Some(score) =>
                     if binary_heap.len() < input.max_predictions {
-                        binary_heap.push(Reverse(Prediction { score, item }));
+                        binary_heap.push(Prediction { score, item: item.clone() });
                     } else {
                         if let Some(min_element) = binary_heap.peek() {
-                            if score > min_element.0.score {
+                            if score > min_element.score {
                                 binary_heap.pop();
-                                binary_heap.push(Reverse(Prediction { score, item }));
+                                binary_heap.push(Prediction { score, item: item.clone() });
                             }
                         }
                     },
@@ -206,33 +204,15 @@ impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
             }
         }
 
-        let same_size = binary_heap.len() == predictions.len();
-        if !same_size {
-            predictions.clear();
-        }
-        for (idx, reverse_prediction) in binary_heap.iter().rev().enumerate() {
-            let prediction = &reverse_prediction.0;
-            if let Some(cur) = predictions.get(idx) {
-                if cur == prediction.item {
-                    continue;
-                }
-            }
-
-            let len = predictions.len();
-            if idx < len {
-                let _ = mem::replace(&mut predictions[idx], prediction.item.clone());
-            } else {
-                predictions.push(prediction.item.clone());
-            }
-        }
-
+        input.predictions = binary_heap.into_sorted_vec().iter().rev()
+            .map(|x| x.clone()).collect();
         input.selected = self.get_new_selected(input);
     }
 
     fn get_new_selected(&self, input: &CurrentInput<T>) -> Option<Selected<T>> {
         match &input.selected {
             Some(selected) => {
-                if let Some(position) = input.predictions.iter().position(|x| *x == selected.item) {
+                if let Some(position) = input.predictions.iter().position(|x| x.item == selected.item) {
                     // If the same item is there, we preserve the selection of the item
                     return Some(Selected {
                         idx: position,
@@ -243,7 +223,7 @@ impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
                     // If the same position is there, we preserve the selection of the position
                     return Some(Selected {
                         idx: selected.idx,
-                        item: input.predictions.get(selected.idx)?.clone(),
+                        item: input.predictions.get(selected.idx)?.item.clone(),
                     });
                 }
             }
@@ -254,7 +234,7 @@ impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
             // Select the first thing if nothing is selected
             return Some(Selected {
                 idx: 0,
-                item: input.predictions.first()?.clone(),
+                item: input.predictions.first()?.item.clone(),
             });
         }
         return None;
@@ -286,26 +266,33 @@ impl<T> Dialogue<T> where T: Display, T: Eq, T: Clone {
     }
 }
 
-struct Prediction<'a, T: ?Sized> {
-    item: &'a T,
+#[derive(Clone)]
+struct Prediction<T> {
+    item: T,
     score: i64,
 }
 
-impl<'a, T> Eq for Prediction<'a, T> {}
+impl<T> Display for Prediction<T> where T: Display {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{}", self.item))
+    }
+}
 
-impl<'a, T> PartialEq<Self> for Prediction<'a, T> {
+impl<T> Eq for Prediction<T> {}
+
+impl<T> PartialEq<Self> for Prediction<T> {
     fn eq(&self, other: &Self) -> bool {
         return self.score.eq(&other.score);
     }
 }
 
-impl<'a, T> PartialOrd<Self> for Prediction<'a, T> {
+impl<T> PartialOrd<Self> for Prediction<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         return self.score.partial_cmp(&other.score);
     }
 }
 
-impl<'a, T> Ord for Prediction<'a, T> {
+impl<T> Ord for Prediction<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         return self.score.cmp(&other.score);
     }
@@ -314,7 +301,7 @@ impl<'a, T> Ord for Prediction<'a, T> {
 struct CurrentInput<T> {
     input: String,
     cursor: usize,
-    predictions: Vec<T>,
+    predictions: Vec<Prediction<T>>,
     max_predictions: usize,
     matcher: SkimMatcherV2,
     selected: Option<Selected<T>>,
