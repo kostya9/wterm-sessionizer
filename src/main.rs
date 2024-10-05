@@ -1,22 +1,22 @@
 use mpsc::channel;
-use std::{self, fs, thread};
 use std::fmt::{Display, Formatter};
 use std::os::windows::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
+use std::{self, fs, thread};
 
 use clap::{Parser, Subcommand};
 use path_absolutize::Absolutize;
 
 use crate::dialogue::dialogue_ui::Dialogue;
 use crate::dialogue::dialogue_ui::DialogueMessage;
-use crate::dialogue::dialogue_ui::{DialogueMessage::ItemsFound, DialogueMessage::ProgressUpdate};
 use crate::dialogue::dialogue_ui::DialogueMessage::{Finish, ForceShutdown};
+use crate::dialogue::dialogue_ui::{DialogueMessage::ItemsFound, DialogueMessage::ProgressUpdate};
 
 mod dialogue;
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+type Result<T, E = Box<dyn std::error::Error>> = std::result::Result<T, E>;
 
 #[derive(Parser, Debug)]
 #[command(arg_required_else_help = true)]
@@ -66,13 +66,13 @@ fn main() -> Result<()> {
 }
 
 fn find_project(path: String, new_tab: bool) -> Result<()> {
-    let (tx, rx) = channel::<DialogueMessage<RepoInfo>>();
+    let (tx, rx) = channel::<DialogueMessage<ProjectInfo>>();
     let search_sender = tx.clone();
     thread::spawn(move || {
         let path = Path::new(&path);
 
         let mut updater = Updater::new(&search_sender);
-        let repos = get_repository_paths(path, &mut updater);
+        let repos = get_project_paths(path, &mut updater);
         search_sender.send(Finish).unwrap();
         return repos;
     });
@@ -80,9 +80,7 @@ fn find_project(path: String, new_tab: bool) -> Result<()> {
     let ctrlc_sender = tx.clone();
     ctrlc::set_handler(move || ctrlc_sender.send(ForceShutdown).unwrap())?;
 
-    let mut selection = Dialogue::new(rx)
-        .prompt("Select repository")
-        .interact();
+    let mut selection = Dialogue::new(rx).prompt("Select repository").interact();
 
     if let Ok(Some(selected_repo)) = selection {
         let selected = &selected_repo.path;
@@ -92,10 +90,10 @@ fn find_project(path: String, new_tab: bool) -> Result<()> {
     return Ok(());
 }
 
-fn path_to_repo(p: &PathBuf) -> RepoInfo {
+fn path_to_project(p: &PathBuf) -> ProjectInfo {
     let details = get_repo_info(&p);
     let full_path = to_full_path(&p);
-    return RepoInfo {
+    return ProjectInfo {
         path: full_path,
         detailed_repo_info: details,
     };
@@ -126,18 +124,35 @@ fn to_full_path(path: &PathBuf) -> String {
     return full_path;
 }
 
-fn is_valid_repository_candidate(dir_entry: &fs::DirEntry) -> bool {
+struct ProjectMarker {
+    is_dir: bool,
+    name: String,
+    path: PathBuf,
+}
+
+fn is_valid_repository_marker(dir_entry: fs::DirEntry) -> Option<ProjectMarker> {
     match dir_entry.metadata() {
         Ok(metadata) => {
             const BANNED_ATTRS: u32 = 4 | 1024; // System | ReparsePoint
             let has_banned_attrs = metadata.file_attributes() & BANNED_ATTRS > 0;
-            return !has_banned_attrs && metadata.is_dir();
+
+            if has_banned_attrs {
+                return None;
+            }
+
+            let name = dir_entry.file_name().to_string_lossy().to_string();
+            let path = dir_entry.path();
+            return Some(ProjectMarker {
+                is_dir: metadata.is_dir(),
+                name,
+                path,
+            });
         }
-        Err(_) => false,
+        Err(_) => None,
     }
 }
 
-fn get_repository_paths(path: &std::path::Path, updater: &mut Updater) -> Vec<RepoInfo> {
+fn get_project_paths(path: &std::path::Path, updater: &mut Updater) -> Vec<ProjectInfo> {
     let mut result = Vec::new();
     let mut traverse_queue = Vec::new();
     traverse_queue.push(PathBuf::from(path));
@@ -150,30 +165,44 @@ fn get_repository_paths(path: &std::path::Path, updater: &mut Updater) -> Vec<Re
             Ok(read_dir) => {
                 let children_dirs = read_dir
                     .map(|d| d.unwrap())
-                    .filter(is_valid_repository_candidate)
+                    .filter_map(|d| is_valid_repository_marker(d))
                     .collect::<Vec<_>>();
 
-                let mut is_repo = false;
+                let mut is_project = false;
                 for child in &children_dirs {
-                    if child.file_name() == ".git" {
-                        is_repo = true;
+                    if child.name == ".git" && child.is_dir {
+                        is_project = true;
                         break;
                     }
                 }
 
-                if is_repo {
-                    let repo = path_to_repo(&popped);
-                    updater.on_new_repo(&repo);
+                if !is_project {
+                    for child in &children_dirs {
+                        if child.name.ends_with(".sln") {
+                            is_project = true;
+                            break;
+                        }
+
+                        if child.name.ends_with(".csproj") {
+                            is_project = true;
+                            break;
+                        }
+                    }
+                }
+
+                if is_project {
+                    let repo = path_to_project(&popped);
+                    updater.on_new_project(&repo);
                     result.push(repo);
                     continue;
                 }
 
                 for child in &children_dirs {
-                    if child.file_name() == "node_modules" {
+                    if child.name == "node_modules" && child.is_dir {
                         continue;
                     }
 
-                    traverse_queue.push(child.path());
+                    traverse_queue.push(child.path.clone());
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => continue, // Its ok to skip directories we cant look at
@@ -184,22 +213,21 @@ fn get_repository_paths(path: &std::path::Path, updater: &mut Updater) -> Vec<Re
     result
 }
 
-
 #[derive(Clone)]
-struct RepoInfo {
+struct ProjectInfo {
     path: String,
     detailed_repo_info: Vec<DetailedRepoInfo>,
 }
 
-impl PartialEq<Self> for RepoInfo {
+impl PartialEq<Self> for ProjectInfo {
     fn eq(&self, other: &Self) -> bool {
         self.path.eq(&other.path)
     }
 }
 
-impl Eq for RepoInfo {}
+impl Eq for ProjectInfo {}
 
-impl Display for RepoInfo {
+impl Display for ProjectInfo {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let emoji = match self.detailed_repo_info.first() {
             None => "",
@@ -207,6 +235,7 @@ impl Display for RepoInfo {
             Some(DetailedRepoInfo::CsharpProject) => " [csharp]",
             Some(DetailedRepoInfo::GoProject) => " [go]",
             Some(DetailedRepoInfo::RustProject) => " [rust]",
+            Some(DetailedRepoInfo::LuaProject) => " [lua]",
         };
 
         let display = self.path.clone() + emoji;
@@ -220,6 +249,7 @@ enum DetailedRepoInfo {
     NpmProject,
     GoProject,
     RustProject,
+    LuaProject,
 }
 
 fn get_repo_info(path: &PathBuf) -> Vec<DetailedRepoInfo> {
@@ -230,7 +260,7 @@ fn get_repo_info(path: &PathBuf) -> Vec<DetailedRepoInfo> {
         let unwrapped = item.unwrap();
         let os_file_name = unwrapped.file_name();
         let file_name = os_file_name.to_string_lossy();
-        if file_name.ends_with(".sln") {
+        if file_name.ends_with(".sln") || file_name.ends_with(".csproj") {
             repos.push(DetailedRepoInfo::CsharpProject);
         }
 
@@ -245,18 +275,24 @@ fn get_repo_info(path: &PathBuf) -> Vec<DetailedRepoInfo> {
         if file_name == "Cargo.toml" {
             repos.push(DetailedRepoInfo::RustProject);
         }
+
+        if file_name.ends_with(".lua") || file_name == "lua" {
+            repos.push(DetailedRepoInfo::LuaProject);
+        }
     }
+
+
 
     return repos;
 }
 
 struct Updater<'a> {
-    sender: &'a Sender<DialogueMessage<RepoInfo>>,
+    sender: &'a Sender<DialogueMessage<ProjectInfo>>,
     last_updated: Option<std::time::Instant>,
 }
 
 impl<'a> Updater<'a> {
-    pub(crate) fn on_new_repo(&self, repo: &RepoInfo) {
+    pub(crate) fn on_new_project(&self, repo: &ProjectInfo) {
         self.sender.send(ItemsFound(vec![repo.clone()])).unwrap()
     }
 
@@ -269,12 +305,16 @@ impl<'a> Updater<'a> {
             }
         }
 
-        let displayPath = folder.to_str().unwrap();
-        self.sender.send(ProgressUpdate(format!("Last found directory:{displayPath}").into_boxed_str())).unwrap();
+        let display_path = folder.to_str().unwrap();
+        self.sender
+            .send(ProgressUpdate(
+                format!("Last found directory:{display_path}").into_boxed_str(),
+            ))
+            .unwrap();
         self.last_updated = Some(std::time::Instant::now());
     }
 
-    fn new(spinner: &Sender<DialogueMessage<RepoInfo>>) -> Updater {
+    fn new(spinner: &Sender<DialogueMessage<ProjectInfo>>) -> Updater {
         Updater {
             sender: spinner,
             last_updated: None,
