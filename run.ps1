@@ -1,2 +1,3 @@
-@((cargo run -- $args) -join "`n") | Invoke-Expression
+$env:RUST_BACKTRACE=1
+@((cargo run --bin wts -- $args) -join "`n")
 

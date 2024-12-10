@@ -8,3 +8,5 @@ $function:prompt = & {
 }
 
 function wts { $result = @((wts.exe $args) -join "`n"); if ($result.StartsWith("<#Execute#>")) { @($result) | Invoke-Expression } else { echo $result } }
+
+function cd { $result = @((wts.exe expand-cd $args) -join "`n"); if ($result.StartsWith("<#Execute#>")) { @($result) | Invoke-Expression } else { echo $result }  }
