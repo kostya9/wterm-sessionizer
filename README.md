@@ -12,7 +12,7 @@ c:\repo2 [csharp]
 
 ## Installation:
 ```
-cargo install wterm-sessionizer --version 0.0.24-alpha
+cargo install wterm-sessionizer --version 0.0.25-alpha
 ```
 
 Add to your powershell profile
@@ -23,3 +23,18 @@ Add to your powershell profile
 
 > [!IMPORTANT]
 > Add the powershell profile code AFTER the prompt modifiers like oh-my-posh so that they won't overwrite the custom logic of wts.
+
+--- 
+
+Adds a "wcd" function that tracks what directories you open usually, and can be used to quickly navigate to them.
+
+E.g. you usually go to a directory called "c:\repo1\src\frontend" and "c:\repo1\src\backend" you can use wcd to quickly navigate to them.
+
+```pwsh
+wcd repo1
+
+wcd frontend
+
+wcd backend
+
+```
