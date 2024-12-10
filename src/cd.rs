@@ -47,7 +47,22 @@ pub fn find_expanded_folder(path: &str) -> Result<Option<String>> {
     let mut dirs = settings.visited_dirs;
     dirs.sort_by(|a, b| b.times.partial_cmp(&a.times).unwrap());
 
-    let similar_dir = dirs.iter().find(|d| d.dir.contains(&path));
+    // Try to give priority to the last directory in the path
+    // E.g. if the target path is Cloud, and the two directories are 
+    // C:\CloudRepos\Hehe and c:\CloudRepos, we should prioritize the second one
+    let mut similar_dir = dirs.iter().find(|d| {
+        let last_part = std::path::Path::new(&d.dir).file_name();
+
+        if let Some(last_part) = last_part {
+            return last_part.to_string_lossy().contains(&path);
+        }
+
+        return false;
+    });
+
+    if similar_dir.is_none() {
+        similar_dir = dirs.iter().find(|d| d.dir.contains(&path));
+    }
 
     if let Some(dir) = similar_dir {
         return Ok(Some(dir.dir.clone()));
