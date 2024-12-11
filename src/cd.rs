@@ -1,31 +1,56 @@
-use std::io::Seek;
+use std::{io::Seek, sync::mpsc::channel};
 
 use dirs;
 use serde::{Deserialize, Serialize};
 use serde_json;
 
+use crate::dialogue::dialogue_ui::{Dialogue, DialogueMessage};
+
 type Result<T, E = Box<dyn std::error::Error>> = std::result::Result<T, E>;
 
 pub fn expand(path: &str) -> Result<()> {
-    let default_cmd = format!("<#Execute#>cd {:}", path);
+    let default_cd_location = path.to_string();
 
     let target_path = std::env::current_dir()?.join(path);
     if target_path.exists() {
-        println!("{}", default_cmd.to_string());
+        execute_cd(&default_cd_location);
         return Ok(());
     }
 
-    if let Ok(Some(folder)) = find_expanded_folder(path) {
-        let cmd = format!("<#Execute#>cd {:}", folder);
-        println!("{}", cmd.to_string());
-    } else {
-        println!("{}", default_cmd.to_string());
+    if let Ok(folders) = find_expanded_folder(path) {
+        if folders.is_empty() {
+            execute_cd(&default_cd_location);
+            return Ok(());
+        }
+
+        if folders.len() == 1 {
+            let folder = folders[0].clone();
+            execute_cd(&folder);
+            return Ok(());
+        }
+
+        let (tx, rx) = channel::<DialogueMessage<String>>();
+        tx.send(DialogueMessage::ItemsFound(folders)).unwrap();
+        let selection = Dialogue::new(rx).prompt("Select folder").interact();
+
+        if let Ok(Some(selection)) = selection {
+            execute_cd(&selection);
+            return Ok(());
+        }
+        
     }
+
+    execute_cd(&default_cd_location);
 
     return Ok(());
 }
 
-pub fn find_expanded_folder(path: &str) -> Result<Option<String>> {
+fn execute_cd(path: &str) {
+    let cmd = format!("<#Execute#>cd \"{:}\"", path);
+    println!("{}", cmd.to_string());
+}
+
+pub fn find_expanded_folder(path: &str) -> Result<Vec<String>> {
     let file_name = "directory_history.json";
     let app_name = "wterm-sessionizer";
     let app_folder = dirs::data_dir().unwrap().join(app_name);
@@ -47,28 +72,11 @@ pub fn find_expanded_folder(path: &str) -> Result<Option<String>> {
     let mut dirs = settings.visited_dirs;
     dirs.sort_by(|a, b| b.times.partial_cmp(&a.times).unwrap());
 
-    // Try to give priority to the last directory in the path
-    // E.g. if the target path is Cloud, and the two directories are 
-    // C:\CloudRepos\Hehe and c:\CloudRepos, we should prioritize the second one
-    let mut similar_dir = dirs.iter().find(|d| {
-        let last_part = std::path::Path::new(&d.dir).file_name();
-
-        if let Some(last_part) = last_part {
-            return last_part.to_string_lossy().contains(&path);
-        }
-
-        return false;
-    });
-
-    if similar_dir.is_none() {
-        similar_dir = dirs.iter().find(|d| d.dir.contains(&path));
-    }
-
-    if let Some(dir) = similar_dir {
-        return Ok(Some(dir.dir.clone()));
-    }
-
-    return Ok(None);
+    let similar = dirs
+        .iter()
+        .filter(|d| d.dir.contains(&path))
+        .map(|d| d.dir.clone());
+    return Ok(similar.into_iter().collect());
 }
 
 pub fn on_changed_directory(new_dir: &str) -> Result<()> {
