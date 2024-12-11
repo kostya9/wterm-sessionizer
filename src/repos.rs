@@ -156,7 +156,7 @@ fn get_project_paths(path: &std::path::Path, updater: &mut Updater) -> Vec<Proje
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => continue, // Its ok to skip directories we cant look at
-            Err(e) => panic!("Encoutnered unknown error: {}", e),
+            Err(e) => { println!("Encoutnered unknown error: {}", e); continue; },
         }
     }
 
