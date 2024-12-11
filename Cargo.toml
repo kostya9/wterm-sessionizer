@@ -1,6 +1,6 @@
 [package]
 name = "wterm-sessionizer"
-version = "0.0.27-alpha"
+version = "0.0.28-alpha"
 authors = ["Kostiantyn Sharovarskyi <services@sharovarskyi.com>"]
 license = "MIT"
 description = "Tool to open repos in another folder"
